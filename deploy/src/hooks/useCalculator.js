@@ -1,12 +1,14 @@
 import { useState, useCallback, useMemo } from 'react';
 import { calculateAPRI, calculateFIB4, validateInput } from '../utils/calculations';
-import { interpretAPRI, interpretFIB4 } from '../utils/interpretations';
+import { interpretAPRI, interpretFIB4, DISEASES } from '../utils/interpretations';
 
 /**
  * 간섬유화 계산기 상태 관리 커스텀 훅
- * @returns {object} 계산기 상태 및 함수들
  */
 export function useCalculator() {
+  // 질환 선택 상태 (기본값: HCV)
+  const [selectedDisease, setSelectedDisease] = useState('HCV');
+
   // 입력값 상태
   const [inputs, setInputs] = useState({
     age: '',
@@ -35,13 +37,11 @@ export function useCalculator() {
     let cleanValue;
 
     if (field === 'platelet') {
-      // 혈소판: 숫자와 쉼표만 허용 (표시용)
+      // 혈소판: 숫자와 쉼표만 허용
       const sanitizedValue = value.replace(/[^0-9,]/g, '');
-      // 유효성 검사를 위해 쉼표 제거한 숫자값 사용
       const numericValue = sanitizedValue.replace(/,/g, '');
       cleanValue = sanitizedValue;
 
-      // 유효성 검사 (쉼표 제거한 값으로)
       const validation = validateInput(field, numericValue);
       setErrors(prev => ({
         ...prev,
@@ -50,14 +50,11 @@ export function useCalculator() {
     } else {
       // 다른 필드: 숫자와 소수점만 허용
       const sanitizedValue = value.replace(/[^0-9.]/g, '');
-
-      // 소수점이 여러 개인 경우 첫 번째만 유지
       const parts = sanitizedValue.split('.');
       cleanValue = parts.length > 2
         ? parts[0] + '.' + parts.slice(1).join('')
         : sanitizedValue;
 
-      // 유효성 검사
       const validation = validateInput(field, cleanValue);
       setErrors(prev => ({
         ...prev,
@@ -65,12 +62,15 @@ export function useCalculator() {
       }));
     }
 
-    setInputs(prev => ({
-      ...prev,
-      [field]: cleanValue
-    }));
+    setInputs(prev => ({ ...prev, [field]: cleanValue }));
+    setHasCalculated(false);
+  }, []);
 
-    // 입력값 변경 시 계산 상태 리셋
+  /**
+   * 질환 선택 핸들러
+   */
+  const handleDiseaseChange = useCallback((disease) => {
+    setSelectedDisease(disease);
     setHasCalculated(false);
   }, []);
 
@@ -78,20 +78,8 @@ export function useCalculator() {
    * 모든 입력값 초기화
    */
   const resetInputs = useCallback(() => {
-    setInputs({
-      age: '',
-      ast: '',
-      alt: '',
-      platelet: '',
-      astULN: '35'
-    });
-    setErrors({
-      age: null,
-      ast: null,
-      alt: null,
-      platelet: null,
-      astULN: null
-    });
+    setInputs({ age: '', ast: '', alt: '', platelet: '', astULN: '35' });
+    setErrors({ age: null, ast: null, alt: null, platelet: null, astULN: null });
     setHasCalculated(false);
   }, []);
 
@@ -100,7 +88,6 @@ export function useCalculator() {
    */
   const canCalculate = useMemo(() => {
     const { age, ast, alt, platelet, astULN } = inputs;
-    // 혈소판은 쉼표 제거 후 값 확인
     const plateletValue = platelet ? platelet.replace(/,/g, '') : '';
     const hasAllValues = age && ast && alt && plateletValue && astULN;
     const hasNoErrors = Object.values(errors).every(e => e === null);
@@ -116,32 +103,11 @@ export function useCalculator() {
   }, [canCalculate]);
 
   /**
-   * 계산 결과 (메모이제이션)
+   * 현재 선택된 질환 정보
    */
-  const results = useMemo(() => {
-    if (!hasCalculated) {
-      return { apri: null, fib4: null, apriInterpretation: null, fib4Interpretation: null };
-    }
-
-    const age = parseFloat(inputs.age);
-    const ast = parseFloat(inputs.ast);
-    const alt = parseFloat(inputs.alt);
-    // 혈소판: /μL → ×10⁹/L 변환 (1000으로 나눔)
-    // 예: 90,000 /μL = 90 ×10⁹/L
-    const plateletRaw = parseFloat(inputs.platelet.replace(/,/g, ''));
-    const platelet = plateletRaw / 1000;
-    const astULN = parseFloat(inputs.astULN);
-
-    const apri = calculateAPRI(ast, astULN, platelet);
-    const fib4 = calculateFIB4(age, ast, alt, platelet);
-
-    return {
-      apri,
-      fib4,
-      apriInterpretation: interpretAPRI(apri),
-      fib4Interpretation: interpretFIB4(fib4, age)
-    };
-  }, [hasCalculated, inputs]);
+  const diseaseInfo = useMemo(() => {
+    return DISEASES[selectedDisease] || DISEASES.HCV;
+  }, [selectedDisease]);
 
   /**
    * 65세 이상 여부
@@ -151,6 +117,40 @@ export function useCalculator() {
     return !isNaN(age) && age >= 65;
   }, [inputs.age]);
 
+  /**
+   * 계산 결과
+   */
+  const results = useMemo(() => {
+    if (!hasCalculated) {
+      return {
+        apri: null,
+        fib4: null,
+        apriInterpretation: null,
+        fib4Interpretation: null,
+        showAPRI: true
+      };
+    }
+
+    const age = parseFloat(inputs.age);
+    const ast = parseFloat(inputs.ast);
+    const alt = parseFloat(inputs.alt);
+    const plateletRaw = parseFloat(inputs.platelet.replace(/,/g, ''));
+    const platelet = plateletRaw / 1000; // /μL → ×10⁹/L 변환
+    const astULN = parseFloat(inputs.astULN);
+
+    const apri = calculateAPRI(ast, astULN, platelet);
+    const fib4 = calculateFIB4(age, ast, alt, platelet);
+
+    return {
+      apri,
+      fib4,
+      apriInterpretation: interpretAPRI(apri),
+      // 질환별 FIB-4 해석 적용
+      fib4Interpretation: interpretFIB4(fib4, age, selectedDisease),
+      showAPRI: diseaseInfo.apriRecommended
+    };
+  }, [hasCalculated, inputs, selectedDisease, diseaseInfo]);
+
   return {
     inputs,
     errors,
@@ -158,7 +158,10 @@ export function useCalculator() {
     canCalculate,
     isElderly,
     results,
+    selectedDisease,
+    diseaseInfo,
     handleInputChange,
+    handleDiseaseChange,
     resetInputs,
     calculate
   };
